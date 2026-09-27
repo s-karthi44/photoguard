@@ -136,8 +136,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     String prediction = _predictionResult?['prediction']?.toString().toLowerCase() ?? '';
-    bool isAi = prediction == 'ai';
-    bool isUncertain = prediction == 'uncertain';
+    bool isAi = prediction.contains('ai') || prediction.contains('spliced') || prediction.contains('fake');
+    bool isUncertain = prediction.contains('uncertain');
     ThemeData theme = Theme.of(context);
 
     return Scaffold(
@@ -437,7 +437,12 @@ class _HomeScreenState extends State<HomeScreen> {
     String titleText;
     IconData icon;
 
-    if (isAi) {
+    String rawPred = _predictionResult?['prediction']?.toString().toLowerCase() ?? '';
+    if (rawPred.contains('spliced')) {
+      cardColor = const Color(0xFFEF4444);
+      titleText = "LOCALIZED SPLICING / AI DETECTED";
+      icon = Icons.warning_amber_rounded;
+    } else if (isAi) {
       cardColor = const Color(0xFFEF4444);
       titleText = "SYNTHETIC / AI DETECTED";
       icon = Icons.warning_amber_rounded;

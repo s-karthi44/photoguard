@@ -116,34 +116,28 @@ class PhotoGuardFusionEngine:
         # - Score < 0.40: Real (Verified Original)
         # - 0.40 <= Score <= 0.60: Uncertain (Inconclusive / Mixed Evidence)
         # - Score > 0.60: AI (Synthetic / AI Detected)
-        if fused_ai_score > 0.60:
+        if splicing_res.get("is_spliced"):
+            prediction = "AI (Spliced)"
+            confidence = max(splicing_res["regions"][0]["confidence"], 85.0)
+            fused_ai_score = max(fused_ai_score, confidence / 100.0)
+            verdict_reason = f"Localized Inpainting / Splicing Detected: Tampered region identified covering {splicing_res['spliced_area_percentage']}% of the image."
+        elif fused_ai_score > 0.60:
             prediction = "AI"
             confidence = fused_ai_score * 100.0
             verdict_reason = "AI Generated / Manipulated: Strong generative artifacts detected across spatial and frequency sub-detectors."
         elif fused_ai_score < 0.40:
-            # Check if localized splicing exists even if overall image is authentic camera photo
-            if splicing_res.get("is_spliced"):
-                prediction = "AI (Spliced)"
-                confidence = max(splicing_res["regions"][0]["confidence"], 85.0)
-                verdict_reason = f"Localized Inpainting / Splicing Detected: Tampered region identified covering {splicing_res['spliced_area_percentage']}% of the image."
-            else:
-                prediction = "Real"
-                confidence = (1.0 - fused_ai_score) * 100.0
-                verdict_reason = "Verified Authentic: Consistent camera sensor noise, natural frequency decay, and uniform compression profile."
+            prediction = "Real"
+            confidence = (1.0 - fused_ai_score) * 100.0
+            verdict_reason = "Verified Authentic: Consistent camera sensor noise, natural frequency decay, and uniform compression profile."
         else:
-            if splicing_res.get("is_spliced"):
-                prediction = "AI (Spliced)"
-                confidence = max(splicing_res["regions"][0]["confidence"], 85.0)
-                verdict_reason = f"Localized Inpainting / Splicing Detected: Tampered region identified covering {splicing_res['spliced_area_percentage']}% of the image."
+            prediction = "Uncertain"
+            confidence = round(max(fused_ai_score, 1.0 - fused_ai_score) * 100.0, 2)
+            # Detect conflicting signals
+            if (cnn_ai_prob > 0.60 and (ela_score < 0.30 or prnu_score < 0.30)) or \
+               ((ela_score > 0.60 or prnu_score > 0.60) and cnn_ai_prob < 0.30):
+                verdict_reason = "Inconclusive: Conflicting evidence between spatial visual features and forensic noise/compression patterns."
             else:
-                prediction = "Uncertain"
-                confidence = round(max(fused_ai_score, 1.0 - fused_ai_score) * 100.0, 2)
-                # Detect conflicting signals
-                if (cnn_ai_prob > 0.60 and (ela_score < 0.30 or prnu_score < 0.30)) or \
-                   ((ela_score > 0.60 or prnu_score > 0.60) and cnn_ai_prob < 0.30):
-                    verdict_reason = "Inconclusive: Conflicting evidence between spatial visual features and forensic noise/compression patterns."
-                else:
-                    verdict_reason = "Inconclusive / Mixed Evidence: Sub-detector signals fall in the borderline uncertainty region (40%-60%). Further forensic review recommended."
+                verdict_reason = "Inconclusive / Mixed Evidence: Sub-detector signals fall in the borderline uncertainty region (40%-60%). Further forensic review recommended."
 
         return {
             "image_name": image_path.name,

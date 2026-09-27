@@ -1,0 +1,34 @@
+# Multi-stage Dockerfile for Flutter Web Frontend
+FROM debian:latest AS build-env
+
+# Install dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    unzip \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Flutter SDK
+RUN git clone https://github.com/flutter/flutter.git -b stable /sdks/flutter
+ENV PATH="/sdks/flutter/bin:$PATH"
+
+# Run flutter doctor & enable web
+RUN flutter doctor -v
+RUN flutter config --enable-web
+
+# Set working directory
+WORKDIR /app
+
+# Copy Flutter application code
+COPY photoguard_app /app
+
+# Build Flutter Web app for production
+RUN flutter pub get
+RUN flutter build web --release
+
+# Stage 2: Serve using Nginx
+FROM nginx:alpine
+COPY --from=build-env /app/build/web /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

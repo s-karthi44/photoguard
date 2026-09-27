@@ -1,0 +1,32 @@
+# Dataset
+datasets/
+
+# Trained models
+models/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+.venv/
+
+# Metadata output files & logs
+metadata/
+outputs/
+
+# Environment variables
+.env
+
+# Checkpoints
+checkpoints/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Temporary work directories & old backups
+work/
+*_old_run.pth
+*.pth_old_run
+photoguard_app/.flutter-plugins

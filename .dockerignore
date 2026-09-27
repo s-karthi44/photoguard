@@ -1,0 +1,26 @@
+# Docker ignore rules
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.toast
+.cache
+
+# Git
+.git
+.gitignore
+
+# Datasets raw files (large files excluded from build context)
+datasets/raw/
+datasets/preprocessed/
+
+# IDE files
+.vscode/
+.idea/
+.ipynb_checkpoints/

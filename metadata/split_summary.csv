@@ -1,0 +1,3 @@
+label,total,train,validation,test
+real,32000,22400,4800,4800
+ai,12000,8400,1800,1800

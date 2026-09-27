@@ -83,12 +83,13 @@ class FFTAnalyzer:
         peakiness = max_val / mean_val
 
         # Map peakiness and peak_count to [0.0, 1.0] anomaly score
-        # Camera images rarely have high frequency spectral peaks (peak_count <= 2, peakiness < 2.0)
-        # AI images with grids often have multiple peaks or extremely high peakiness.
-        score_count = min(peak_count / 10.0, 1.0)
-        score_peakiness = min(max((peakiness - 1.8) / 2.0, 0.0), 1.0)
+        # Natural scenes contain 15-40 minor high-frequency local variations.
+        # AI upsampling artifacts produce prominent, sharp periodic spikes (peakiness > 1.65) and dense peak clusters (> 35).
+        score_count = min(max((peak_count - 35) / 35.0, 0.0), 1.0)
+        score_peakiness = min(max((peakiness - 1.60) / 1.4, 0.0), 1.0)
         
-        grid_score = 0.4 * score_count + 0.6 * score_peakiness
+        # Grid anomaly score is driven by sharp spectral spikes (peakiness) confirmed by peak count
+        grid_score = 0.3 * score_count + 0.7 * score_peakiness
 
         # 6. Generate normalized 2D FFT magnitude spectrum visualizer
         norm_mag = cv2.normalize(log_magnitude, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)

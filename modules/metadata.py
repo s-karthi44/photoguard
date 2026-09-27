@@ -78,13 +78,13 @@ class MetadataVerifier:
         if explicit_ai_found:
             anomaly_score = 1.0
         elif not has_exif:
-            # Completely missing EXIF is common for internet/AI images, but not a positive proof
-            anomaly_score = 0.5
+            # Completely missing EXIF is standard for web downloads, messaging apps, and screenshots (inconclusive/neutral)
+            anomaly_score = 0.10
         elif camera_make is None and camera_model is None:
-            # Has EXIF but lacks any standard camera make/model (suspect)
-            anomaly_score = 0.4
+            # Has EXIF but lacks standard camera make/model (neutral/slight notice)
+            anomaly_score = 0.15
         else:
-            # Standard camera details present and no AI keywords found
+            # Standard camera details present and no AI keywords found (strong authentic indicator)
             anomaly_score = 0.0
 
         return {

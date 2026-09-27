@@ -113,42 +113,42 @@ class PhotoGuardFusionEngine:
         )
 
         # 5. Output unified 3-state prediction verdict
-        # - Score < 0.40: Real (Verified Original)
-        # - 0.40 <= Score <= 0.60: Uncertain (Inconclusive / Mixed Evidence)
-        # - Score > 0.60: AI (Synthetic / AI Detected)
-        has_physical_noise_anomaly = prnu_score >= 0.55
-        has_spectral_grid_anomaly = fft_score >= 0.35
-        is_cnn_deceived = cnn_ai_prob < 0.25
+        # Calibrated anomaly checks for physical camera sensor & spectral grid footprints
+        has_physical_noise_anomaly = prnu_score >= 0.70
+        has_spectral_grid_anomaly = fft_score >= 0.60
+        is_cnn_deceived = cnn_ai_prob < 0.20
 
-        if splicing_res.get("is_spliced"):
+        # Gated Splicing: Only trigger local inpainting verdict if the image has non-negligible
+        # AI/manipulation features (avoiding false alarms on intricate real statues/textures)
+        is_true_splicing = splicing_res.get("is_spliced") and (cnn_ai_prob >= 0.15 or prnu_score >= 0.40)
+
+        if is_true_splicing:
             prediction = "AI (Spliced)"
-            confidence = max(splicing_res["regions"][0]["confidence"], 85.0)
+            confidence = max(splicing_res["regions"][0]["confidence"], 80.0)
             fused_ai_score = max(fused_ai_score, confidence / 100.0)
             verdict_reason = f"Localized Inpainting / Splicing Detected: Tampered region identified covering {splicing_res['spliced_area_percentage']}% of the image."
         elif has_physical_noise_anomaly and has_spectral_grid_anomaly and is_cnn_deceived:
-            # Physical camera sensor footprint is missing and frequency grid is present
-            # Classic signature of photorealistic generative models (Ideogram, Midjourney v6, Flux)
+            # Physical camera sensor footprint is completely missing and strong frequency grid lattice is present
             prediction = "AI"
             fused_ai_score = max(fused_ai_score, 0.68)
             confidence = round(fused_ai_score * 100.0, 2)
             verdict_reason = f"AI Generated: Physical camera sensor noise is absent (PRNU: {round(prnu_score*100)}%) and spectral grid artifacts detected (FFT: {round(fft_score*100)}%) despite deceptive visual realism."
-        elif (has_physical_noise_anomaly or has_spectral_grid_anomaly) and is_cnn_deceived:
+        elif (has_physical_noise_anomaly or has_spectral_grid_anomaly) and is_cnn_deceived and fused_ai_score >= 0.40:
             prediction = "Uncertain"
-            fused_ai_score = max(fused_ai_score, 0.52)
             confidence = round(max(fused_ai_score, 1.0 - fused_ai_score) * 100.0, 2)
             anomalies = []
             if has_physical_noise_anomaly:
                 anomalies.append(f"PRNU sensor noise missing ({round(prnu_score*100)}%)")
             if has_spectral_grid_anomaly:
                 anomalies.append(f"FFT frequency grid detected ({round(fft_score*100)}%)")
-            verdict_reason = f"Inconclusive / Potential AI: Visual textures appear natural to the CNN, but physical camera forensics show anomalies: {', '.join(anomalies)}. Likely a high-fidelity generative model (Ideogram/Midjourney)."
-        elif fused_ai_score > 0.60:
+            verdict_reason = f"Inconclusive / Potential AI: Visual textures appear natural to the CNN, but physical camera forensics show anomalies: {', '.join(anomalies)}."
+        elif fused_ai_score >= 0.55:
             prediction = "AI"
-            confidence = fused_ai_score * 100.0
+            confidence = round(fused_ai_score * 100.0, 2)
             verdict_reason = "AI Generated / Manipulated: Strong generative artifacts detected across spatial and frequency sub-detectors."
-        elif fused_ai_score < 0.40:
+        elif fused_ai_score < 0.35:
             prediction = "Real"
-            confidence = (1.0 - fused_ai_score) * 100.0
+            confidence = round((1.0 - fused_ai_score) * 100.0, 2)
             verdict_reason = "Verified Authentic: Consistent camera sensor noise, natural frequency decay, and uniform compression profile."
         else:
             prediction = "Uncertain"
@@ -158,7 +158,7 @@ class PhotoGuardFusionEngine:
                ((ela_score > 0.60 or prnu_score > 0.60) and cnn_ai_prob < 0.30):
                 verdict_reason = "Inconclusive: Conflicting evidence between spatial visual features and forensic noise/compression patterns."
             else:
-                verdict_reason = "Inconclusive / Mixed Evidence: Sub-detector signals fall in the borderline uncertainty region (40%-60%). Further forensic review recommended."
+                verdict_reason = "Inconclusive / Mixed Evidence: Sub-detector signals fall in the borderline uncertainty region (35%-55%). Further forensic review recommended."
 
         return {
             "image_name": image_path.name,

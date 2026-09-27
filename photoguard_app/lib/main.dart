@@ -497,7 +497,9 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                "Unified Fusion Score",
+                isAi
+                    ? "AI Probability Score"
+                    : (isUncertain ? "Forensic Uncertainty Score" : "Authenticity Confidence"),
                 style: TextStyle(color: Colors.grey.shade300, fontSize: 14),
               ),
               Text(

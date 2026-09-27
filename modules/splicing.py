@@ -25,7 +25,7 @@ from modules.cnn.gradcam import GradCAM, BEST_MODEL_PATH
 from modules.paths import OUTPUT_DIR
 
 class SplicingDetector:
-    def __init__(self, ela_quality: int = 95, activation_threshold: float = 0.40):
+    def __init__(self, ela_quality: int = 95, activation_threshold: float = 0.65):
         """
         Args:
             ela_quality: JPEG re-compression quality for ELA disparity.
@@ -195,7 +195,8 @@ class SplicingDetector:
         overlay_rgb = cv2.cvtColor(overlay_bgr, cv2.COLOR_BGR2RGB)
 
         total_spliced_pct = round((spliced_pixels / total_pixels) * 100.0, 2)
-        is_spliced = len(detected_regions) > 0 and total_spliced_pct >= 2.0
+        has_high_confidence_region = any(r.get("confidence", 0) >= 65.0 for r in detected_regions)
+        is_spliced = len(detected_regions) > 0 and total_spliced_pct >= 2.5 and has_high_confidence_region
 
         # 5. Save visual artifacts
         mask_filename = f"splicing_mask_{image_path.stem}.png"

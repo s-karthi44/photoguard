@@ -107,8 +107,11 @@ While the core MVP, forensic pipeline, API, and UI are fully functional and prod
 - [x] Unseen Generator Benchmark Suite Active (`scripts/test_unseen_generators.py`)
 - [x] FastAPI Server Online at `http://127.0.0.1:8000` with Splicing Static Endpoints
 - [x] Flutter Web/Desktop Client Online with 5-Tab Forensic Lens `[Original | Grad-CAM | ELA | FFT | Splicing]`
+- [x] Multi-Scale Patch-Based Inference (9-point unscaled native resolution cropping grid for SOTA photorealistic diffusion detection)
+- [x] SOTA Diffusion Dynamic Fusion Calibration & Missing-EXIF Uncertainty Guard
 - [x] Forensic Perturbation Robustness Test Suite Verified
 - [x] Full IEEE Research Paper Formulated (`IEEE_RESEARCH_PAPER_PHOTOGUARD.md`)
 
 ---
 *PhotoGuard AI Project Team — September 2026*
+

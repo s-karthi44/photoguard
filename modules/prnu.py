@@ -98,13 +98,20 @@ class PRNUAnalyzer:
         # Real camera photos:
         # - Physical sensor shot noise gives variance >= 0.90 in flat regions
         # - Spatial correlation is low (<= 0.35)
+        # - High Shannon entropy (>= 3.20)
         # AI / Synthetic images:
         # - Excessively smooth flat regions without sensor noise floor (variance < 0.70)
         # - Interpolation / upsampling correlations (correlation > 0.50)
+        # - Suppressed or quantized noise entropy (< 3.00)
         corr_score = max(0.0, min((correlation - 0.35) / 0.35, 1.0))
         noise_floor_score = max(0.0, min((0.85 - variance) / 0.85, 1.0))
+        entropy_score = max(0.0, min((3.15 - noise_entropy) / 1.35, 1.0))
 
-        anomaly_score = 0.5 * corr_score + 0.5 * noise_floor_score
+        # Overall PRNU anomaly: triggered if noise is unnaturally smooth, correlated, OR low-entropy
+        anomaly_score = max(
+            0.5 * corr_score + 0.5 * noise_floor_score,
+            entropy_score * (0.85 if noise_entropy < 2.2 else 0.60)
+        )
 
         return {
             "prnu_anomaly_score": round(float(anomaly_score), 4),

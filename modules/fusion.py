@@ -22,6 +22,7 @@ from modules.ela import ELAAnalyzer
 from modules.fft import FFTAnalyzer
 from modules.metadata import MetadataVerifier
 from modules.splicing import SplicingDetector
+from modules.face import FaceForensicAnalyzer
 
 class PhotoGuardFusionEngine:
     def __init__(self):
@@ -31,6 +32,7 @@ class PhotoGuardFusionEngine:
         self.fft_analyzer = FFTAnalyzer()
         self.metadata_verifier = MetadataVerifier()
         self.splicing_detector = SplicingDetector()
+        self.face_analyzer = FaceForensicAnalyzer()
 
         # Decision Fusion Weights
         self.w_cnn = 0.50
@@ -56,6 +58,7 @@ class PhotoGuardFusionEngine:
         fft_res = self.fft_analyzer.analyze(image_path)
         meta_res = self.metadata_verifier.analyze(image_path)
         splicing_res = self.splicing_detector.analyze(image_path)
+        face_res = self.face_analyzer.analyze(image_path)
 
         # 2. Extract probability of being AI (0.0 to 1.0)
         # Class names: 0 -> AI, 1 -> Real
@@ -64,17 +67,42 @@ class PhotoGuardFusionEngine:
         ela_score = ela_res["ela_anomaly_score"]
         fft_score = fft_res["fft_grid_score"]
 
-        # Adapt weights based on file format (lossless PNG doesn't support ELA double compression)
+        patch_analytics = cnn_res.get("patch_analytics", {})
+        patch_ai_ratio = patch_analytics.get("patch_ai_ratio", 0.0) / 100.0
+        patch_mean_ai = patch_analytics.get("patch_mean_ai", 0.0) / 100.0
+        has_patch_ai = patch_ai_ratio >= 0.50 and patch_mean_ai >= 0.55
+        global_ai_prob = patch_analytics.get("global_ai", cnn_ai_prob * 100.0) / 100.0
+
+        # Physical camera sensor verification:
+        # Authentic optical camera sensors introduce stochastic, spatially uncorrelated PRNU shot noise
+        # with natural entropy >= 3.20 and low spatial lag-1 autocorrelation <= 0.26.
+        # Conversely, AI diffusion generators lack physical sensor noise (entropy < 3.20, higher correlation).
+        noise_entropy = prnu_res.get("noise_entropy", 0.0)
+        noise_corr = prnu_res.get("noise_spatial_correlation", 0.0)
+        has_authentic_sensor = (noise_entropy >= 3.20 and noise_corr <= 0.26)
+
+        # Adapt weights based on file format & secondary detector responsiveness
         is_png = image_path.suffix.lower() == ".png"
-        w_cnn = self.w_cnn
-        w_prnu = self.w_prnu
-        w_ela = self.w_ela
-        w_fft = self.w_fft
-        
-        if is_png:
+        secondary_dormant = (prnu_score <= 0.15 and ela_score <= 0.15 and fft_score <= 0.15)
+
+        if secondary_dormant and (has_patch_ai or cnn_ai_prob >= 0.50):
+            # SOTA Diffusion / Web-compressed AI: Secondary physical/frequency detectors
+            # are suppressed by single-pass generation or lossy compression, while
+            # unscaled native patches confirm synthetic generative micro-textures.
+            w_cnn = 0.80
+            w_prnu = 0.10
+            w_ela = 0.05 if not is_png else 0.0
+            w_fft = 0.05 if not is_png else 0.10
+        elif is_png:
             w_ela = 0.0
             w_cnn = 0.60
             w_fft = 0.20
+            w_prnu = 0.20
+        else:
+            w_cnn = self.w_cnn
+            w_prnu = self.w_prnu
+            w_ela = self.w_ela
+            w_fft = self.w_fft
 
         # 3. Override if explicit AI EXIF tags are found
         if meta_res["metadata_anomaly_score"] == 1.0:
@@ -99,7 +127,8 @@ class PhotoGuardFusionEngine:
                     "camera_make": meta_res["camera_make"],
                     "camera_model": meta_res["camera_model"],
                     "ela_visual_path": ela_res["ela_output_path"],
-                    "fft_visual_path": fft_res.get("fft_output_path")
+                    "fft_visual_path": fft_res.get("fft_output_path"),
+                    "patch_analytics": patch_analytics
                 },
                 "verdict_reason": f"Explicit AI generation tag detected in image metadata ({meta_res['software_tag']})."
             }
@@ -111,12 +140,24 @@ class PhotoGuardFusionEngine:
             w_ela * ela_score +
             w_fft * fft_score
         )
+        if secondary_dormant and (has_patch_ai or cnn_ai_prob >= 0.50):
+            fused_ai_score = max(fused_ai_score, cnn_ai_prob * 0.95)
 
-        # 5. Output unified 3-state prediction verdict
+        # 5. Output unified prediction verdict
         # Calibrated anomaly checks for physical camera sensor & spectral grid footprints
         has_physical_noise_anomaly = prnu_score >= 0.70
         has_spectral_grid_anomaly = fft_score >= 0.60
         is_cnn_deceived = cnn_ai_prob < 0.20
+
+        # GAN Facial Synthesis detection (StyleGAN / FFHQ signature):
+        # 1. Face adheres to FFHQ normalized coordinates (canonical eye line, centered eyes, zero tilt)
+        # 2. Camera sensor PRNU noise entropy is suppressed (entropy < 2.50 or prnu_score >= 0.65)
+        # 3. No physical camera EXIF hardware metadata
+        is_gan_face = (
+            face_res.get("is_ffhq_aligned", False) and
+            (prnu_score >= 0.65 or noise_entropy < 2.50) and
+            not meta_res["has_exif"]
+        )
 
         # Gated Splicing: Only trigger local inpainting verdict if the image has non-negligible
         # AI/manipulation features (avoiding false alarms on intricate real statues/textures)
@@ -127,12 +168,47 @@ class PhotoGuardFusionEngine:
             confidence = max(splicing_res["regions"][0]["confidence"], 80.0)
             fused_ai_score = max(fused_ai_score, confidence / 100.0)
             verdict_reason = f"Localized Inpainting / Splicing Detected: Tampered region identified covering {splicing_res['spliced_area_percentage']}% of the image."
+        elif is_gan_face:
+            prediction = "AI (GAN Face)"
+            confidence = max(88.0, round(face_res.get("gan_face_score", 0.88) * 100.0, 2))
+            fused_ai_score = max(fused_ai_score, confidence / 100.0)
+            verdict_reason = f"AI Generated (StyleGAN / GAN Architecture): Canonical FFHQ facial alignment detected with absent physical camera sensor noise (Entropy: {round(noise_entropy, 2)} bits) and asymmetric corneal catchlight disparity ({round(face_res.get('catchlight_disparity', 0.0) * 100, 1)}%)."
+        elif has_authentic_sensor and global_ai_prob < 0.25:
+            # Physical camera sensor footprint is confirmed present (true CMOS/CCD quantum shot noise),
+            # and holistic scene composition is natural. Protect authentic camera photos from false alarms!
+            prediction = "Real"
+            fused_ai_score = min(fused_ai_score, global_ai_prob)
+            confidence = round((1.0 - fused_ai_score) * 100.0, 2)
+            if not meta_res["has_exif"]:
+                confidence = min(confidence, 88.0)
+                verdict_reason = "Verified Authentic: Natural optical textures and physical camera sensor noise profile confirmed."
+            else:
+                verdict_reason = "Verified Authentic: Consistent camera sensor noise, natural frequency decay, and hardware EXIF verification."
+        elif not has_authentic_sensor and (has_patch_ai or patch_ai_ratio >= 0.50):
+            # SOTA Diffusion: Physical camera sensor noise is absent (smooth latent noise floor)
+            # and unscaled native patches confirm synthetic generative micro-textures.
+            prediction = "AI"
+            fused_ai_score = max(fused_ai_score, patch_mean_ai, 0.60)
+            confidence = round(fused_ai_score * 100.0, 2)
+            verdict_reason = f"AI Generated (SOTA Diffusion): Physical camera sensor noise is absent and unscaled native patches confirm synthetic generative micro-textures ({int(patch_ai_ratio * 100)}% of patches flagged)."
         elif has_physical_noise_anomaly and has_spectral_grid_anomaly and is_cnn_deceived:
             # Physical camera sensor footprint is completely missing and strong frequency grid lattice is present
             prediction = "AI"
             fused_ai_score = max(fused_ai_score, 0.68)
             confidence = round(fused_ai_score * 100.0, 2)
             verdict_reason = f"AI Generated: Physical camera sensor noise is absent (PRNU: {round(prnu_score*100)}%) and spectral grid artifacts detected (FFT: {round(fft_score*100)}%) despite deceptive visual realism."
+        elif has_physical_noise_anomaly and not has_authentic_sensor and not meta_res["has_exif"] and is_cnn_deceived:
+            prediction = "AI (Synthetic Noise Profile)"
+            confidence = round(max(prnu_score, 0.72) * 100.0, 2)
+            fused_ai_score = max(fused_ai_score, confidence / 100.0)
+            verdict_reason = f"AI Generated: Physical camera sensor noise is completely absent (Entropy: {round(noise_entropy, 2)} bits) and camera metadata is missing, indicating mathematical synthesis."
+        elif (fused_ai_score >= 0.50 and has_patch_ai) or fused_ai_score >= 0.55:
+            prediction = "AI"
+            confidence = round(fused_ai_score * 100.0, 2)
+            if has_patch_ai:
+                verdict_reason = f"AI Generated (SOTA Diffusion): High-frequency synthetic micro-artifacts detected across native resolution patches ({int(patch_ai_ratio * 100)}% of patches flagged)."
+            else:
+                verdict_reason = "AI Generated / Manipulated: Strong generative artifacts detected across spatial and frequency sub-detectors."
         elif (has_physical_noise_anomaly or has_spectral_grid_anomaly) and is_cnn_deceived and fused_ai_score >= 0.40:
             prediction = "Uncertain"
             confidence = round(max(fused_ai_score, 1.0 - fused_ai_score) * 100.0, 2)
@@ -142,18 +218,22 @@ class PhotoGuardFusionEngine:
             if has_spectral_grid_anomaly:
                 anomalies.append(f"FFT frequency grid detected ({round(fft_score*100)}%)")
             verdict_reason = f"Inconclusive / Potential AI: Visual textures appear natural to the CNN, but physical camera forensics show anomalies: {', '.join(anomalies)}."
-        elif fused_ai_score >= 0.55:
-            prediction = "AI"
-            confidence = round(fused_ai_score * 100.0, 2)
-            verdict_reason = "AI Generated / Manipulated: Strong generative artifacts detected across spatial and frequency sub-detectors."
-        elif fused_ai_score < 0.35:
+        elif fused_ai_score < 0.35 and has_authentic_sensor:
             prediction = "Real"
             confidence = round((1.0 - fused_ai_score) * 100.0, 2)
-            verdict_reason = "Verified Authentic: Consistent camera sensor noise, natural frequency decay, and uniform compression profile."
+            if not meta_res["has_exif"]:
+                confidence = min(confidence, 85.0)
+                verdict_reason = "Plausibly Authentic: Natural textures and sensor noise, though metadata was stripped by upload/compression."
+            else:
+                verdict_reason = "Verified Authentic: Consistent camera sensor noise, natural frequency decay, and uniform compression profile."
+        elif fused_ai_score < 0.35:
+            # Low fused score but authentic sensor noise NOT confirmed
+            prediction = "Uncertain"
+            confidence = round(max(fused_ai_score, 1.0 - fused_ai_score) * 100.0, 2)
+            verdict_reason = "Inconclusive: Visual features appear natural, but physical camera sensor shot noise could not be verified."
         else:
             prediction = "Uncertain"
             confidence = round(max(fused_ai_score, 1.0 - fused_ai_score) * 100.0, 2)
-            # Detect conflicting signals
             if (cnn_ai_prob > 0.60 and (ela_score < 0.30 or prnu_score < 0.30)) or \
                ((ela_score > 0.60 or prnu_score > 0.60) and cnn_ai_prob < 0.30):
                 verdict_reason = "Inconclusive: Conflicting evidence between spatial visual features and forensic noise/compression patterns."
@@ -183,7 +263,9 @@ class PhotoGuardFusionEngine:
                 "ela_visual_path": ela_res["ela_output_path"],
                 "fft_visual_path": fft_res.get("fft_output_path"),
                 "splicing_overlay_path": splicing_res.get("overlay_path"),
-                "splicing_mask_path": splicing_res.get("mask_path")
+                "splicing_mask_path": splicing_res.get("mask_path"),
+                "patch_analytics": patch_analytics,
+                "face_analytics": face_res
             },
             "splicing": splicing_res,
             "verdict_reason": verdict_reason
